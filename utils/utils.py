@@ -120,7 +120,10 @@ def get_model(args, device, t_to_sigma, no_parallel=False, confidence_mode=False
                             args.rmsd_classification_cutoff, list) else 1)
 
     if device.type == 'cuda' and not no_parallel:
-        model = DataParallel(model)
+        if args.device_ids is not None:
+            model = DataParallel(model, device_ids=[int(i) for i in args.device_ids.split(',')])
+        else:
+            model = DataParallel(model)
     model.to(device)
     return model
 

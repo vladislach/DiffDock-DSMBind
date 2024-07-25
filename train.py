@@ -3,7 +3,7 @@ import math
 import os
 from functools import partial
 
-import wandb
+# import wandb
 import torch
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -20,7 +20,7 @@ from utils.training import train_epoch, test_epoch, loss_function, inference_epo
 from utils.utils import save_yaml_file, get_optimizer_and_scheduler, get_model, ExponentialMovingAverage
 
 
-def train(args, model, optimizer, scheduler, ema_weights, train_loader, val_loader, t_to_sigma, run_dir):
+def train(args, model, optimizer, scheduler, ema_weights, train_loader, val_loader, t_to_sigma, run_dir, device):
     best_val_loss = math.inf
     best_val_inference_value = math.inf if args.inference_earlystop_goal == 'min' else 0
     best_epoch = 0
@@ -92,6 +92,16 @@ def train(args, model, optimizer, scheduler, ema_weights, train_loader, val_load
 
 def main_function():
     args = parse_train_args()
+
+    if torch.cuda.is_available():
+        if args.device_ids is not None:
+            device_ids = [int(i) for i in args.device_ids.split(',')]
+            device = torch.device(f'cuda:{device_ids[0]}')
+        else:
+            device = torch.device('cuda:0')
+    else:
+        device = torch.device('cpu')
+
     if args.config:
         config_dict = yaml.load(args.config, Loader=yaml.FullLoader)
         arg_dict = args.__dict__
@@ -136,7 +146,7 @@ def main_function():
 
     if args.wandb:
         wandb.init(
-            entity='entity',
+            # entity='entity',
             settings=wandb.Settings(start_method="fork"),
             project=args.project,
             name=args.run_name,
@@ -150,9 +160,8 @@ def main_function():
     save_yaml_file(yaml_file_name, args.__dict__)
     args.device = device
 
-    train(args, model, optimizer, scheduler, ema_weights, train_loader, val_loader, t_to_sigma, run_dir)
+    train(args, model, optimizer, scheduler, ema_weights, train_loader, val_loader, t_to_sigma, run_dir, device)
 
 
 if __name__ == '__main__':
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     main_function()
