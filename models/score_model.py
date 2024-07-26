@@ -197,11 +197,11 @@ class TensorProductScoreModel(torch.nn.Module):
             self.final_conv = TensorProductConvLayer(
                 in_irreps=self.lig_conv_layers[-1].out_irreps,
                 sh_irreps=self.sh_irreps,
-                out_irreps=f'2x1o + 2x1e',
+                out_irreps=f'1x0e',
                 n_edge_features=2 * ns,
                 residual=False,
                 dropout=dropout,
-                batch_norm=batch_norm
+                batch_norm=False
             )
             self.tr_final_layer = nn.Sequential(nn.Linear(1 + sigma_embed_dim, ns),nn.Dropout(dropout), nn.ReLU(), nn.Linear(ns, 1))
             self.rot_final_layer = nn.Sequential(nn.Linear(1 + sigma_embed_dim, ns),nn.Dropout(dropout), nn.ReLU(), nn.Linear(ns, 1))
@@ -232,6 +232,8 @@ class TensorProductScoreModel(torch.nn.Module):
                 )
 
     def forward(self, data):
+        data['ligand'].pos.requires_grad_()
+
         if not self.confidence_mode:
             tr_sigma, rot_sigma, tor_sigma = self.t_to_sigma(*[data.complex_t[noise_type] for noise_type in ['tr', 'rot', 'tor']])
         else:
@@ -298,21 +300,35 @@ class TensorProductScoreModel(torch.nn.Module):
         center_edge_attr = torch.cat([center_edge_attr, lig_node_attr[center_edge_index[1], :self.ns]], -1)
         global_pred = self.final_conv(lig_node_attr, center_edge_index, center_edge_attr, center_edge_sh, out_nodes=data.num_graphs)
 
-        tr_pred = global_pred[:, :3] + global_pred[:, 6:9]
-        rot_pred = global_pred[:, 3:6] + global_pred[:, 9:]
+        # DSMBind part:
+        f, = torch.autograd.grad(global_pred.sum(), data['ligand'].pos, create_graph=True, retain_graph=True)
+
+        tr_pred = scatter(f, data['ligand'].batch, dim=0, reduce='mean')
+
+        center = scatter(data['ligand'].pos, data['ligand'].batch, dim=0, reduce='mean')
+        lig_pos_centered = data['ligand'].pos - center[data['ligand'].batch]
+        G = torch.cross(lig_pos_centered, f, dim=-1)
+        G = scatter(G, data['ligand'].batch, dim=0, reduce='sum') # [B,3] angular momentum
+        inner = (lig_pos_centered ** 2 ).sum(dim=-1).view(-1, 1, 1) * torch.eye(3, device=lig_pos_centered.device)
+        outer = torch.einsum('ij,ik->ijk', lig_pos_centered, lig_pos_centered)
+        inertia = inner + outer
+        I = 0.1 * scatter(inertia, data['ligand'].batch, dim=0, reduce='sum') # [B, 3, 3] inertia matrix
+        rot_pred = torch.linalg.solve(I, G)
+
         data.graph_sigma_emb = self.timestep_emb_func(data.complex_t['tr'])
 
-        # fix the magnitude of translational and rotational score vectors
-        tr_norm = torch.linalg.vector_norm(tr_pred, dim=1).unsqueeze(1)
-        tr_pred = tr_pred / tr_norm * self.tr_final_layer(torch.cat([tr_norm, data.graph_sigma_emb], dim=1))
-        rot_norm = torch.linalg.vector_norm(rot_pred, dim=1).unsqueeze(1)
-        rot_pred = rot_pred / rot_norm * self.rot_final_layer(torch.cat([rot_norm, data.graph_sigma_emb], dim=1))
+        # # fix the magnitude of translational and rotational score vectors
+        # tr_norm = torch.linalg.vector_norm(tr_pred, dim=1).unsqueeze(1)
+        # tr_pred = tr_pred / tr_norm * self.tr_final_layer(torch.cat([tr_norm, data.graph_sigma_emb], dim=1))
+        # rot_norm = torch.linalg.vector_norm(rot_pred, dim=1).unsqueeze(1)
+        # rot_pred = rot_pred / rot_norm * self.rot_final_layer(torch.cat([rot_norm, data.graph_sigma_emb], dim=1))
 
-        if self.scale_by_sigma:
-            tr_pred = tr_pred / tr_sigma.unsqueeze(1)
-            rot_pred = rot_pred * so3.score_norm(rot_sigma.cpu()).unsqueeze(1).to(data['ligand'].x.device)
+        # if self.scale_by_sigma:
+        #     tr_pred = tr_pred / tr_sigma.unsqueeze(1)
+        #     rot_pred = rot_pred * so3.score_norm(rot_sigma.cpu()).unsqueeze(1).to(data['ligand'].x.device)
 
-        if self.no_torsion or data['ligand'].edge_mask.sum() == 0: return tr_pred, rot_pred, torch.empty(0, device=self.device)
+        if self.no_torsion or data['ligand'].edge_mask.sum() == 0:
+            return tr_pred, rot_pred, torch.empty(0, device=self.device)
 
         # torsional components
         tor_bonds, tor_edge_index, tor_edge_attr, tor_edge_sh = self.build_bond_conv_graph(data)
@@ -389,10 +405,12 @@ class TensorProductScoreModel(torch.nn.Module):
                             data['receptor'].batch, data['ligand'].batch, max_num_neighbors=10000)
 
         src, dst = edge_index
-        edge_vec = data['receptor'].pos[dst.long()] - data['ligand'].pos[src.long()]
+        src = src.clone()
+        dst = dst.clone()
+        edge_vec = data['receptor'].pos[dst] - data['ligand'].pos[src]
 
         edge_length_emb = self.cross_distance_expansion(edge_vec.norm(dim=-1))
-        edge_sigma_emb = data['ligand'].node_sigma_emb[src.long()]
+        edge_sigma_emb = data['ligand'].node_sigma_emb[src]
         edge_attr = torch.cat([edge_sigma_emb, edge_length_emb], 1)
         edge_sh = o3.spherical_harmonics(self.sh_irreps, edge_vec, normalize=True, normalization='component')
 

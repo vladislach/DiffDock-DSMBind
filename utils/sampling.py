@@ -52,8 +52,7 @@ def sampling(data_list, model, inference_steps, tr_schedule, rot_schedule, tor_s
             tr_sigma, rot_sigma, tor_sigma = t_to_sigma(t_tr, t_rot, t_tor)
             set_time(complex_graph_batch, t_tr, t_rot, t_tor, b, model_args.all_atoms, device)
             
-            with torch.no_grad():
-                tr_score, rot_score, tor_score = model(complex_graph_batch)
+            tr_score, rot_score, tor_score = model(complex_graph_batch)
 
             tr_g = tr_sigma * torch.sqrt(torch.tensor(2 * np.log(model_args.tr_sigma_max / model_args.tr_sigma_min)))
             rot_g = 2 * rot_sigma * torch.sqrt(torch.tensor(np.log(model_args.rot_sigma_max / model_args.rot_sigma_min)))

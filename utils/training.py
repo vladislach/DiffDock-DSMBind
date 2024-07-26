@@ -142,8 +142,7 @@ def test_epoch(model, loader, device, t_to_sigma, loss_fn, test_sigma_intervals=
 
     for data in tqdm(loader, total=len(loader)):
         try:
-            with torch.no_grad():
-                tr_pred, rot_pred, tor_pred = model(data)
+            tr_pred, rot_pred, tor_pred = model(data)
 
             loss, tr_loss, rot_loss, tor_loss, tr_base_loss, rot_base_loss, tor_base_loss = \
                 loss_fn(tr_pred, rot_pred, tor_pred, data=data, t_to_sigma=t_to_sigma, apply_mean=False, device=device)
