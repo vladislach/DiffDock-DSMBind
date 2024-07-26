@@ -3,7 +3,7 @@ import math
 import os
 from functools import partial
 
-# import wandb
+import wandb
 import torch
 torch.multiprocessing.set_sharing_strategy('file_system')
 
