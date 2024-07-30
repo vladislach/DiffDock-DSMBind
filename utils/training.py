@@ -95,6 +95,7 @@ class AverageMeter():
 
 def train_epoch(model, loader, optimizer, device, t_to_sigma, loss_fn, ema_weigths):
     model.train()
+    model.training = True
     meter = AverageMeter(['loss', 'tr_loss', 'rot_loss', 'tor_loss', 'tr_base_loss', 'rot_base_loss', 'tor_base_loss'])
 
     for data in tqdm(loader, total=len(loader)):
@@ -132,6 +133,7 @@ def train_epoch(model, loader, optimizer, device, t_to_sigma, loss_fn, ema_weigt
 
 def test_epoch(model, loader, device, t_to_sigma, loss_fn, test_sigma_intervals=False):
     model.eval()
+    model.training = False
     meter = AverageMeter(['loss', 'tr_loss', 'rot_loss', 'tor_loss', 'tr_base_loss', 'rot_base_loss', 'tor_base_loss'],
                          unpooled_metrics=True)
 
@@ -183,6 +185,7 @@ def test_epoch(model, loader, device, t_to_sigma, loss_fn, test_sigma_intervals=
 
 
 def inference_epoch(model, complex_graphs, device, t_to_sigma, args):
+    model.training = False
     t_schedule = get_t_schedule(inference_steps=args.inference_steps)
     tr_schedule, rot_schedule, tor_schedule = t_schedule, t_schedule, t_schedule
 
@@ -223,7 +226,7 @@ def inference_epoch(model, complex_graphs, device, t_to_sigma, args):
             orig_complex_graph['ligand'].orig_pos = orig_complex_graph['ligand'].orig_pos[0]
 
         ligand_pos = np.asarray(
-            [complex_graph['ligand'].pos.cpu().numpy()[filterHs] for complex_graph in predictions_list])
+            [complex_graph['ligand'].pos.cpu().detach().numpy()[filterHs] for complex_graph in predictions_list])
         orig_ligand_pos = np.expand_dims(
             orig_complex_graph['ligand'].orig_pos[filterHs] - orig_complex_graph.original_center.cpu().numpy(), axis=0)
         rmsd = np.sqrt(((ligand_pos - orig_ligand_pos) ** 2).sum(axis=2).mean(axis=1))

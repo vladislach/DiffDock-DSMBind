@@ -115,6 +115,7 @@ class TensorProductScoreModel(torch.nn.Module):
         self.timestep_emb_func = timestep_emb_func
         self.confidence_mode = confidence_mode
         self.num_conv_layers = num_conv_layers
+        self.training = True
 
         self.lig_node_embedding = AtomEncoder(emb_dim=ns, feature_dims=lig_feature_dims, sigma_embed_dim=sigma_embed_dim)
         self.lig_edge_embedding = nn.Sequential(nn.Linear(in_lig_edge_features + sigma_embed_dim + distance_embed_dim, ns),nn.ReLU(), nn.Dropout(dropout),nn.Linear(ns, ns))
@@ -301,7 +302,7 @@ class TensorProductScoreModel(torch.nn.Module):
         global_pred = self.final_conv(lig_node_attr, center_edge_index, center_edge_attr, center_edge_sh, out_nodes=data.num_graphs)
 
         # DSMBind part:
-        f, = torch.autograd.grad(global_pred.sum(), data['ligand'].pos, create_graph=True, retain_graph=True)
+        f, = torch.autograd.grad(global_pred.sum(), data['ligand'].pos, create_graph=self.training)
 
         tr_pred = scatter(f, data['ligand'].batch, dim=0, reduce='mean')
 
